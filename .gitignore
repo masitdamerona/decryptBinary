@@ -1,0 +1,19 @@
+# THEOS-Tweak
+._*
+*.deb
+.debmake
+_
+obj
+.theos/
+packages/
+
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.xcodeproj/*
+/*.gcno
+**/xcshareddata/WorkspaceSettings.xcsettings
+
+.DS_Store
+*/build/*

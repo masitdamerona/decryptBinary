@@ -1,0 +1,10 @@
+Package: com.merona.decryptbinary
+Name: decryptBinary
+Version: 0.0.1
+Architecture: iphoneos-arm
+Description: iOS app binary decryption and dumping tool. Automatically decrypts and dumps encrypted iOS app binaries using MobileSubstrate injection. Includes CLI tool for easy operation.
+Maintainer: merona
+Author: merona
+Section: System
+Tag: role::developer, purpose::security
+Depends: mobilesubstrate, firmware (>= 14.0)
