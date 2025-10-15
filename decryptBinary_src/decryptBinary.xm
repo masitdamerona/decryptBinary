@@ -5,40 +5,42 @@
 #import <string.h>
 #import <fcntl.h>
 #import <errno.h>
+#import <dlfcn.h>
 
-static NSString* getOutputPath(const char* appName) {
+static NSString* getCurrentBundleID() {
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSString *bundleID = [mainBundle bundleIdentifier];
+    return bundleID;
+}
+
+static NSString* getCurrentAppName() {
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSString *appName = [mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"];
+    if (!appName) {
+        appName = [mainBundle objectForInfoDictionaryKey:@"CFBundleName"];
+    }
+    return appName;
+}
+
+static NSString* getOutputPath() {
     // Get Documents directory (more accessible)
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     if (paths.count > 0) {
         NSString *documentsPath = paths[0];
         NSLog(@"[DecryptBinary] Using Documents path: %@", documentsPath);
-        return [NSString stringWithFormat:@"%@/%s.decrypted", documentsPath, appName];
+        return [NSString stringWithFormat:@"%@/%@.decrypted", documentsPath, getCurrentAppName()];
     }
 
     return nil;
 }
 
-static void dumpBinary(const char* targetName, const char* appName) {
-    uint32_t imageCount = _dyld_image_count();
-    const struct mach_header *targetHeader = NULL;
-    const char *targetPath = NULL;
-
-    // Find target module
-    for (uint32_t i = 0; i < imageCount; i++) {
-        const char *imagePath = _dyld_get_image_name(i);
-        if (strstr(imagePath, targetName)) {
-            targetHeader = _dyld_get_image_header(i);
-            targetPath = imagePath;
-            break;
-        }
-    }
-
+static void dumpBinary(const struct mach_header *targetHeader, const char *targetPath) {
     if (!targetHeader || !targetPath) {
-        NSLog(@"[DecryptBinary] Cannot find module: %s", targetName);
+        NSLog(@"[DecryptBinary] Invalid parameters");
         return;
     }
 
-    NSString *outputPath = getOutputPath(appName);
+    NSString *outputPath = getOutputPath();
     if (outputPath == nil) {
         NSLog(@"[DecryptBinary] Cannot determine output path");
         return;
@@ -60,8 +62,6 @@ static void dumpBinary(const char* targetName, const char* appName) {
         return;
     }
 
-    NSLog(@"[DecryptBinary] Files opened successfully");
-
     // Get file size
     struct stat st;
     if (fstat(oldFile, &st) < 0) {
@@ -79,8 +79,6 @@ static void dumpBinary(const char* targetName, const char* appName) {
         write(newFile, buffer, bytesRead);
         totalBytes += bytesRead;
     }
-
-    NSLog(@"[DecryptBinary] Copied %lld bytes", totalBytes);
 
     // Parse Mach-O header
     BOOL is64bit = NO;
@@ -151,26 +149,32 @@ static void dumpBinary(const char* targetName, const char* appName) {
 
     fchmod(newFile, 0644);
 
-    NSLog(@"[DecryptBinary] ======= DUMP COMPLETE =======");
     NSLog(@"[DecryptBinary] Saved to: %@", outputPath);
 
     close(oldFile);
     close(newFile);
 }
 
-static NSString* getCurrentBundleID() {
-    NSBundle *mainBundle = [NSBundle mainBundle];
-    NSString *bundleID = [mainBundle bundleIdentifier];
-    return bundleID;
-}
+static void onImageLoaded(const struct mach_header *header, intptr_t slide) {
+    static BOOL dumped = NO;
+    if (dumped) return;
 
-static NSString* getCurrentAppName() {
-    NSBundle *mainBundle = [NSBundle mainBundle];
-    NSString *appName = [mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"];
-    if (!appName) {
-        appName = [mainBundle objectForInfoDictionaryKey:@"CFBundleName"];
+    Dl_info imageInfo;
+    if (dladdr(header, &imageInfo) == 0) return;
+    
+    const char *imagePath = imageInfo.dli_fname;
+    if (!imagePath) return;
+
+    NSString *mainExecPath = [[NSBundle mainBundle] executablePath];
+    if (!mainExecPath) return;
+
+    if (strcmp(imagePath, [mainExecPath UTF8String]) == 0) {
+        dumped = YES;
+        NSLog(@"[DecryptBinary] Main binary loaded.");
+        NSLog(@"[DecryptBinary] ======= STARTING DUMP =======");
+        dumpBinary(header, imagePath);
+        NSLog(@"[DecryptBinary] ======= DUMP COMPLETE =======");
     }
-    return appName;
 }
 
 %ctor {
@@ -181,22 +185,6 @@ static NSString* getCurrentAppName() {
     NSLog(@"[DecryptBinary] PID: %d", getpid());
     NSLog(@"[DecryptBinary] App Name: %@", appName);
     NSLog(@"[DecryptBinary] Bundle ID: %@", bundleID);
-    NSLog(@"[DecryptBinary] Process: %s", _dyld_get_image_name(0));
 
-    // Since MobileSubstrate only injects into the target app via Filter,
-    // we can dump immediately when loaded
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSLog(@"[DecryptBinary] ======= DUMP TRIGGERED =======");
-        NSLog(@"[DecryptBinary] Target Bundle ID: %@", bundleID);
-
-        const char *executablePath = _dyld_get_image_name(0);
-        const char *executableName = strrchr(executablePath, '/');
-        if (executableName) executableName++;
-        else executableName = executablePath;
-
-        NSLog(@"[DecryptBinary] Dumping executable: %s", executableName);
-        dumpBinary(executableName, [appName UTF8String]);
-
-        NSLog(@"[DecryptBinary] ======= DUMP FINISHED =======");
-    });
+    _dyld_register_func_for_add_image(onImageLoaded);
 }
