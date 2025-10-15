@@ -47,7 +47,18 @@ Decrypted binaries are automatically saved to:
 ## Requirements
 
 ### Runtime Requirements
-- Jailbroken iOS device(MobileSubstrate)
+- Jailbroken iOS device
+  - **Rootful :** MobileSubstrate
+  - **Rootless :** ElleKit
+
+> **Note:** If you don't have the required tweak injection framework installed, you can install it via terminal:
+> ```bash
+> # For Rootful (MobileSubstrate)
+> apt install mobilesubstrate
+>
+> # For Rootless (ElleKit)
+> apt install ellekit
+> ```
 
 ### Build Requirements
 - [Theos](https://theos.dev/) development environment
@@ -77,7 +88,3 @@ make clean && make package
 ```bash
 make clean && make package ROOTLESS=1
 ```
-
-## License
-
-This project is licensed under the MIT License.
